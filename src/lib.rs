@@ -1,9 +1,12 @@
 #![feature(gen_blocks)]
 
 use bits_bytes_iter::BitsBytesIter;
+use byte_buffer::ByteBuffer;
 use core::panic;
+use heapless::Deque;
 
 mod bits_bytes_iter;
+mod byte_buffer;
 
 pub struct HeatShrink<const W: usize, const L: usize> {
     window: [u8; W],
@@ -19,6 +22,83 @@ impl<'a, const W: usize, const L: usize> HeatShrink<W, L> {
             lookahead: [0; L],
             window_index: 0,
             lookahead_index: 0,
+        }
+    }
+
+    pub fn reset(&mut self) -> () {
+        self.window = [0; W];
+        self.lookahead = [0; L];
+        self.window_index = 0;
+        self.lookahead_index = 0;
+    }
+
+    pub fn encode<I: Iterator<Item = &'a u8>>(&mut self, mut input: I) -> impl Iterator<Item = u8> {
+        gen move {
+            let mut lookahead_deque = Deque::<_, L>::new();
+            let mut byte_buffer = ByteBuffer::new();
+
+            // while let Some(input_byte) = input.next() {
+
+            if let Some(input_byte) = input.next() {
+                lookahead_deque.push_front(*input_byte).unwrap();
+            }
+
+            while !lookahead_deque.is_empty() {
+                // fill the lookahead using the input
+                while !lookahead_deque.is_full() {
+                    if let Some(input_byte) = input.next() {
+                        lookahead_deque.push_front(*input_byte).unwrap();
+                    } else {
+                        break;
+                    }
+                }
+
+                // Look through the window from the current window index backwards
+                // Find the largest bytes which match
+
+                if false {
+                    // - prepare to output a 0 bit
+
+                    if let Some(output_byte) = byte_buffer.add_bit(false) {
+                        yield output_byte;
+                    }
+                    // - the backref index byte / bytes
+                    // - the count bits
+                } else {
+                    // - prepare to output a 1 bit
+                    // - and the byte literal
+                    if let Some(output_byte) = byte_buffer.add_bit(true) {
+                        yield output_byte;
+                    }
+
+                    let literal_byte = lookahead_deque.pop_back().unwrap();
+                    if let Some(output_byte) = byte_buffer.add_byte(literal_byte) {
+                        yield output_byte;
+                    }
+                    self.push_window_value(literal_byte);
+                }
+            }
+
+            // deal with what's left in the lookahead buffer
+
+            while let Some(byte) = lookahead_deque.pop_back() {
+                if let Some(output_byte) = byte_buffer.add_bit(true) {
+                    yield output_byte;
+                }
+                if let Some(output_byte) = byte_buffer.add_byte(byte) {
+                    yield output_byte;
+                }
+            }
+
+            return;
+
+            // check the window for a > 2 (or 3, depends on W & L values) byte match from the first lookahead onwards
+            // if there's a match for a count of N bytes then:
+            // - prepare to output a 0 bit
+            // - the backref index byte / bytes
+            // - the count bits
+
+            // put the processed byte into the window & shift the window index along one, repeat
         }
     }
 
@@ -115,6 +195,14 @@ impl<'a, const W: usize, const L: usize> HeatShrink<W, L> {
             return self.window[(W - 1) - remainer];
         }
     }
+
+    fn push_window_value(&mut self, byte: u8) -> () {
+        self.window[self.window_index] = byte;
+        self.window_index += 1;
+        if self.window_index >= W {
+            self.window_index = 0;
+        }
+    }
 }
 
 #[cfg(test)]
@@ -138,13 +226,13 @@ mod tests {
 
     #[test]
     fn compare_loop() {
-        let input = include_bytes!("../tsz-compressed-data.bin.hs");
+        let input = include_bytes!("../test_inputs/tsz-compressed-data.bin.hs");
         let mut hs = HeatShrink::<256, 8>::new();
 
         let input_iter = (*input).iter();
         let mut out = hs.decode(input_iter);
 
-        let expected_output = include_bytes!("../tsz-compressed-data.bin");
+        let expected_output = include_bytes!("../test_inputs/tsz-compressed-data.bin");
         let mut expected_iter = expected_output.iter();
 
         let mut index = 0;
@@ -159,7 +247,7 @@ mod tests {
 
     #[test]
     fn decode_bytes() {
-        let input = include_bytes!("../tsz-compressed-data.bin.hs");
+        let input = include_bytes!("../test_inputs/tsz-compressed-data.bin.hs");
         let mut hs = HeatShrink::<256, 8>::new();
 
         let input_iter = (*input).iter();
@@ -168,10 +256,36 @@ mod tests {
 
         let result: Vec<u8> = out.collect();
 
-        let mut file = File::create("./test-output.bin").unwrap();
+        let mut file = File::create("./test_output/test-output.bin").unwrap();
         file.write_all(&result).unwrap();
 
         // let expected_output = include_bytes!("../tsz-compressed-data.bin");
+        // assert_eq!(result, expected_output);
+    }
+
+    #[test]
+    fn encode_decode() {
+        let input = include_bytes!("./lib.rs");
+        let mut hs = HeatShrink::<256, 8>::new();
+
+        let input_iter = (*input).iter();
+        let encode_iter = hs.encode(input_iter);
+
+        let encode_output: Vec<u8> = encode_iter.collect();
+
+        let mut file = File::create("./test_output/test-output-rs.bin").unwrap();
+        file.write_all(&encode_output).unwrap();
+
+        hs.reset();
+
+        let encode_output_iter = encode_output.iter();
+
+        let out = hs.decode(encode_output_iter);
+
+        let decoded_output: Vec<u8> = out.collect();
+
+        let mut file = File::create("./test_output/test-output-rs-decoded.rs").unwrap();
+        file.write_all(&decoded_output).unwrap();
         // assert_eq!(result, expected_output);
     }
 }
