@@ -47,7 +47,6 @@ impl<'a, I: Iterator<Item = &'a u8>> BitsBytesIter<'a, I> {
     fn advance_bit_offset(&mut self) -> () {
         self.bit_offset += 1;
         if self.bit_offset == 8 {
-            println!("bit offset reset");
             self.bit_offset = 0;
             self.load_next_from_raw();
         }

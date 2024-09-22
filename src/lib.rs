@@ -13,7 +13,6 @@ pub struct HeatShrink<const W: usize, const L: usize> {
 }
 
 impl<'a, const W: usize, const L: usize> HeatShrink<W, L> {
-    // Constructor: initialize the window and lookahead buffers to zero
     pub fn new() -> Self {
         Self {
             window: [0; W],
@@ -23,22 +22,14 @@ impl<'a, const W: usize, const L: usize> HeatShrink<W, L> {
         }
     }
 
-    pub fn decode<I: Iterator<Item = &'a u8>>(&mut self, mut input: I) -> impl Iterator<Item = u8> {
+    pub fn decode<I: Iterator<Item = &'a u8>>(&mut self, input: I) -> impl Iterator<Item = u8> {
         gen move {
             let mut bb_iter = BitsBytesIter::new(input);
 
-            let mut loop_count: usize = 0;
             while let Some(bit) = bb_iter.next_bit() {
                 match bit {
                     true => {
-                        dbg!(&bb_iter);
-
                         if let Some(byte) = bb_iter.next() {
-                            // dbg!(byte);
-                            if byte == 186 {
-                                println!("---- WRONG VALUE ----");
-                                dbg!(&bb_iter);
-                            }
                             yield self.prep_output_byte(byte);
                         } else {
                             return;
@@ -83,16 +74,11 @@ impl<'a, const W: usize, const L: usize> HeatShrink<W, L> {
                         let count = self.read_number_from_bits(&mut count_bits) + 1;
 
                         for _ in 0..count {
-                            // since we always add 1 to the window index when we output the back_ref_index doesn't need to change
+                            // since we always add 1 to the window index when we output
+                            // the back_ref_index doesn't need to change
                             let window_value = self.get_window_value(back_ref_index);
                             yield self.prep_output_byte(window_value);
                         }
-
-                        if loop_count > 1 {
-                            return;
-                        }
-                        loop_count += 1;
-                        // return;
                     }
                 }
             }
@@ -156,16 +142,18 @@ mod tests {
         let mut hs = HeatShrink::<256, 8>::new();
 
         let input_iter = (*input).iter();
-
         let mut out = hs.decode(input_iter);
 
         let expected_output = include_bytes!("../tsz-compressed-data.bin");
         let mut expected_iter = expected_output.iter();
 
+        let mut index = 0;
+
         while let Some(expected) = expected_iter.next() {
             let actual = out.next().unwrap();
 
-            assert_eq!(actual, *expected);
+            assert_eq!(actual, *expected, "Failed on index {index}");
+            index += 1;
         }
     }
 
