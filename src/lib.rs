@@ -2,34 +2,28 @@
 
 use bits_bytes_iter::BitsBytesIter;
 use byte_buffer::ByteBuffer;
-use core::panic;
-use heapless::Deque;
+use heapless::{Deque, HistoryBuffer};
 
 mod bits_bytes_iter;
 mod byte_buffer;
 
 pub struct HeatShrink<const W: usize, const L: usize> {
-    window: [u8; W],
+    // window: [u8; W],
+    window: HistoryBuffer<u8, W>,
     lookahead: [u8; L],
-    window_index: usize,
-    lookahead_index: usize,
 }
 
 impl<'a, const W: usize, const L: usize> HeatShrink<W, L> {
     pub fn new() -> Self {
         Self {
-            window: [0; W],
+            window: HistoryBuffer::<_, W>::new(),
             lookahead: [0; L],
-            window_index: 0,
-            lookahead_index: 0,
         }
     }
 
     pub fn reset(&mut self) -> () {
-        self.window = [0; W];
+        self.window.clear();
         self.lookahead = [0; L];
-        self.window_index = 0;
-        self.lookahead_index = 0;
     }
 
     pub fn encode<I: Iterator<Item = &'a u8>>(&mut self, mut input: I) -> impl Iterator<Item = u8> {
@@ -110,13 +104,15 @@ impl<'a, const W: usize, const L: usize> HeatShrink<W, L> {
                 match bit {
                     true => {
                         if let Some(byte) = bb_iter.next() {
-                            yield self.prep_output_byte(byte);
+                            self.push_window_value(byte);
+                            yield byte;
                         } else {
                             return;
                         }
                     }
                     false => {
-                        let back_ref_index = if W > 255 {
+                        // TODO: this doesn't seem right
+                        let back_ref_index = if W > 1255 {
                             let msb_index_byte = bb_iter.next();
                             let lsb_index_byte = bb_iter.next();
 
@@ -153,11 +149,14 @@ impl<'a, const W: usize, const L: usize> HeatShrink<W, L> {
 
                         let count = self.read_number_from_bits(&mut count_bits) + 1;
 
+                        dbg!(&count, &back_ref_index);
+
                         for _ in 0..count {
                             // since we always add 1 to the window index when we output
                             // the back_ref_index doesn't need to change
-                            let window_value = self.get_window_value(back_ref_index);
-                            yield self.prep_output_byte(window_value);
+                            let output_byte = self.get_window_value(back_ref_index);
+                            self.push_window_value(output_byte);
+                            yield output_byte;
                         }
                     }
                 }
@@ -177,31 +176,33 @@ impl<'a, const W: usize, const L: usize> HeatShrink<W, L> {
         result
     }
 
-    fn prep_output_byte(&mut self, byte: u8) -> u8 {
-        self.window[self.window_index] = byte;
-        self.window_index += 1;
-        if self.window_index == (W - 1) {
-            self.window_index = 0;
-        }
-
-        byte
-    }
-
     fn get_window_value(&self, back_index: usize) -> u8 {
-        if self.window_index >= back_index {
-            return self.window[self.window_index - back_index];
-        } else {
-            let remainer = self.window_index % back_index;
-            return self.window[(W - 1) - remainer];
+        if back_index > self.window.len() {
+            return 0;
         }
+
+        if let Some(byte) = self.window.into_iter().nth(back_index) {
+            *byte
+        } else {
+            0
+        }
+
+        // self.window.into_iter().
+        // dbg!(back_index);
+        // let (top_slice, bottom_slice) = self.window.as_slices();
+        // dbg!(&top_slice, &bottom_slice);
+
+        // if back_index < top_slice.len() {
+        //     top_slice[back_index]
+        // } else if (back_index - top_slice.len()) < bottom_slice.len() {
+        //     bottom_slice[back_index - top_slice.len()]
+        // } else {
+        //     0
+        // }
     }
 
     fn push_window_value(&mut self, byte: u8) -> () {
-        self.window[self.window_index] = byte;
-        self.window_index += 1;
-        if self.window_index >= W {
-            self.window_index = 0;
-        }
+        self.window.write(byte);
     }
 }
 
