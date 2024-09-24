@@ -1,4 +1,5 @@
 #![feature(gen_blocks)]
+#![feature(generic_const_exprs)]
 
 use bits_bytes_iter::BitsBytesIter;
 use byte_buffer::ByteBuffer;
@@ -7,93 +8,128 @@ use heapless::{Deque, HistoryBuffer};
 mod bits_bytes_iter;
 mod byte_buffer;
 
-pub struct HeatShrink<const W: usize, const L: usize> {
-    // window: [u8; W],
-    window: HistoryBuffer<u8, W>,
-    lookahead: [u8; L],
+#[macro_export]
+macro_rules! heatshrink {
+    ($w:expr, $l:expr) => {
+        HeatShrink::<$w, $l, { 1 << $w }, { 1 << $l }>
+    };
 }
 
-impl<'a, const W: usize, const L: usize> HeatShrink<W, L> {
+pub struct HeatShrink<
+    const W: usize,
+    const L: usize,
+    const WINDOW_SIZE: usize,
+    const LOOKAHEAD_SIZE: usize,
+> {
+    window: HistoryBuffer<u8, WINDOW_SIZE>,
+    lookahead: Deque<u8, LOOKAHEAD_SIZE>,
+}
+
+impl<'a, const W: usize, const L: usize, const WINDOW_SIZE: usize, const LOOKAHEAD_SIZE: usize>
+    HeatShrink<W, L, WINDOW_SIZE, LOOKAHEAD_SIZE>
+{
     pub fn new() -> Self {
-        Self {
-            window: HistoryBuffer::<_, W>::new(),
-            lookahead: [0; L],
-        }
+        let mut hs = Self {
+            window: HistoryBuffer::new(),
+            lookahead: Deque::new(),
+        };
+        hs.reset();
+        hs
     }
 
     pub fn reset(&mut self) -> () {
-        self.window.clear();
-        self.lookahead = [0; L];
+        self.window.clear_with(0);
+        self.lookahead.clear();
     }
 
     pub fn encode<I: Iterator<Item = &'a u8>>(&mut self, mut input: I) -> impl Iterator<Item = u8> {
         gen move {
-            let mut lookahead_deque = Deque::<_, L>::new();
             let mut byte_buffer = ByteBuffer::new();
 
-            // while let Some(input_byte) = input.next() {
-
             if let Some(input_byte) = input.next() {
-                lookahead_deque.push_front(*input_byte).unwrap();
+                self.lookahead.push_front(*input_byte).unwrap();
             }
 
-            while !lookahead_deque.is_empty() {
-                // fill the lookahead using the input
-                while !lookahead_deque.is_full() {
+            while !self.lookahead.is_empty() {
+                while !self.lookahead.is_full() {
                     if let Some(input_byte) = input.next() {
-                        lookahead_deque.push_front(*input_byte).unwrap();
+                        self.lookahead.push_front(*input_byte).unwrap();
                     } else {
                         break;
                     }
                 }
 
-                // Look through the window from the current window index backwards
-                // Find the largest bytes which match
+                let literal_byte = self.lookahead.pop_back().unwrap();
 
-                if false {
-                    // - prepare to output a 0 bit
+                if let Some((back_ref_index, count)) = self.find_lookahead_in_window(literal_byte) {
+                    dbg!(back_ref_index, count);
 
                     if let Some(output_byte) = byte_buffer.add_bit(false) {
                         yield output_byte;
                     }
-                    // - the backref index byte / bytes
-                    // - the count bits
+
+                    if W > 255 {
+                        // TODO this bit'll be wrong
+                        let back_ref_byte_msb = (back_ref_index << 255) as u8;
+                        let back_ref_byte_lsb = back_ref_index as u8;
+
+                        if let Some(output_byte) = byte_buffer.add_byte(back_ref_byte_msb) {
+                            yield output_byte;
+                        }
+                        if let Some(output_byte) = byte_buffer.add_byte(back_ref_byte_lsb) {
+                            yield output_byte;
+                        }
+                    } else {
+                        let back_ref_byte = back_ref_index as u8;
+                        if let Some(output_byte) = byte_buffer.add_byte(back_ref_byte) {
+                            yield output_byte;
+                        }
+                    }
+
+                    let bits = self.write_number_to_bits(count);
+
+                    for bit in bits {
+                        if let Some(output_byte) = byte_buffer.add_bit(bit) {
+                            yield output_byte;
+                        }
+                    }
                 } else {
-                    // - prepare to output a 1 bit
-                    // - and the byte literal
                     if let Some(output_byte) = byte_buffer.add_bit(true) {
                         yield output_byte;
-                    }
-
-                    let literal_byte = lookahead_deque.pop_back().unwrap();
+                    };
                     if let Some(output_byte) = byte_buffer.add_byte(literal_byte) {
                         yield output_byte;
-                    }
-                    self.push_window_value(literal_byte);
+                    };
                 }
+
+                self.push_window_value(literal_byte);
             }
-
-            // deal with what's left in the lookahead buffer
-
-            while let Some(byte) = lookahead_deque.pop_back() {
-                if let Some(output_byte) = byte_buffer.add_bit(true) {
-                    yield output_byte;
-                }
-                if let Some(output_byte) = byte_buffer.add_byte(byte) {
-                    yield output_byte;
-                }
-            }
-
             return;
-
-            // check the window for a > 2 (or 3, depends on W & L values) byte match from the first lookahead onwards
-            // if there's a match for a count of N bytes then:
-            // - prepare to output a 0 bit
-            // - the backref index byte / bytes
-            // - the count bits
-
-            // put the processed byte into the window & shift the window index along one, repeat
         }
+    }
+
+    fn find_lookahead_in_window(&self, literal_byte: u8) -> Option<(usize, usize)> {
+        let mut max_match = None;
+        let mut window_iter = self.window.oldest_ordered().into_iter().enumerate();
+
+        while let Some((index, &byte)) = window_iter.next() {
+            if byte == literal_byte {
+                let lookahead_iter = self.lookahead.iter();
+
+                let current_count = 1 + window_iter
+                    .by_ref()
+                    .map(|(_, b)| b)
+                    .zip(lookahead_iter)
+                    .take_while(|(a, b)| a == b)
+                    .count();
+
+                if current_count > max_match.map_or(2, |(_, len)| len) {
+                    max_match = Some((self.window.len() - index, current_count));
+                }
+            }
+        }
+
+        max_match
     }
 
     pub fn decode<I: Iterator<Item = &'a u8>>(&mut self, input: I) -> impl Iterator<Item = u8> {
@@ -112,7 +148,7 @@ impl<'a, const W: usize, const L: usize> HeatShrink<W, L> {
                     }
                     false => {
                         // TODO: this doesn't seem right
-                        let back_ref_index = if W > 1255 {
+                        let back_ref_index = if W > 8 {
                             let msb_index_byte = bb_iter.next();
                             let lsb_index_byte = bb_iter.next();
 
@@ -166,39 +202,27 @@ impl<'a, const W: usize, const L: usize> HeatShrink<W, L> {
 
     fn read_number_from_bits(&mut self, bits: &mut [bool; L]) -> usize {
         let mut result = 0;
-
         for (i, &bit) in bits.iter().enumerate() {
             if bit {
                 result |= 1 << (L - 1 - i);
             }
         }
-
         result
+    }
+
+    fn write_number_to_bits(&self, number: usize) -> [bool; L] {
+        let mut bits = [false; L];
+        for i in 0..L {
+            bits[i] = (number & (1 << (L - 1 - i))) != 0;
+        }
+        bits
     }
 
     fn get_window_value(&self, back_index: usize) -> u8 {
         if back_index > self.window.len() {
             return 0;
         }
-
-        if let Some(byte) = self.window.into_iter().nth(back_index) {
-            *byte
-        } else {
-            0
-        }
-
-        // self.window.into_iter().
-        // dbg!(back_index);
-        // let (top_slice, bottom_slice) = self.window.as_slices();
-        // dbg!(&top_slice, &bottom_slice);
-
-        // if back_index < top_slice.len() {
-        //     top_slice[back_index]
-        // } else if (back_index - top_slice.len()) < bottom_slice.len() {
-        //     bottom_slice[back_index - top_slice.len()]
-        // } else {
-        //     0
-        // }
+        self.window.into_iter().nth(back_index).map_or(0, |b| *b)
     }
 
     fn push_window_value(&mut self, byte: u8) -> () {
@@ -217,7 +241,7 @@ mod tests {
         let first: u8 = 0b11000000;
         let second: u8 = 0b11100000;
         let input: Vec<&u8> = vec![&first, &second];
-        let mut hs = HeatShrink::<13, 4>::new();
+        let mut hs = <heatshrink!(13, 4)>::new();
 
         let out = hs.decode(input.into_iter());
 
@@ -228,7 +252,7 @@ mod tests {
     #[test]
     fn compare_loop() {
         let input = include_bytes!("../test_inputs/tsz-compressed-data.bin.hs");
-        let mut hs = HeatShrink::<256, 8>::new();
+        let mut hs = <heatshrink!(8, 4)>::new();
 
         let input_iter = (*input).iter();
         let mut out = hs.decode(input_iter);
@@ -249,7 +273,7 @@ mod tests {
     #[test]
     fn decode_bytes() {
         let input = include_bytes!("../test_inputs/tsz-compressed-data.bin.hs");
-        let mut hs = HeatShrink::<256, 8>::new();
+        let mut hs = <heatshrink!(8, 4)>::new();
 
         let input_iter = (*input).iter();
 
@@ -267,7 +291,7 @@ mod tests {
     #[test]
     fn encode_decode() {
         let input = include_bytes!("./lib.rs");
-        let mut hs = HeatShrink::<256, 8>::new();
+        let mut hs = <heatshrink!(8, 4)>::new();
 
         let input_iter = (*input).iter();
         let encode_iter = hs.encode(input_iter);
