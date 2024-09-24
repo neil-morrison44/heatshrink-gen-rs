@@ -69,14 +69,13 @@ impl<'a, const W: usize, const L: usize, const WINDOW_SIZE: usize, const LOOKAHE
                     }
 
                     if W > 255 {
-                        // TODO this bit'll be wrong
-                        let back_ref_byte_msb = (back_ref_index << 255) as u8;
-                        let back_ref_byte_lsb = back_ref_index as u8;
+                        let msb_index_byte: u8 = (back_ref_index >> 8) as u8;
+                        let lsb_index_byte: u8 = (back_ref_index & 0xFF) as u8;
 
-                        if let Some(output_byte) = byte_buffer.add_byte(back_ref_byte_msb) {
+                        if let Some(output_byte) = byte_buffer.add_byte(msb_index_byte) {
                             yield output_byte;
                         }
-                        if let Some(output_byte) = byte_buffer.add_byte(back_ref_byte_lsb) {
+                        if let Some(output_byte) = byte_buffer.add_byte(lsb_index_byte) {
                             yield output_byte;
                         }
                     } else {
@@ -86,12 +85,18 @@ impl<'a, const W: usize, const L: usize, const WINDOW_SIZE: usize, const LOOKAHE
                         }
                     }
 
-                    let bits = self.write_number_to_bits(count);
+                    let bits = self.write_number_to_bits(count - 1);
 
                     for bit in bits {
                         if let Some(output_byte) = byte_buffer.add_bit(bit) {
                             yield output_byte;
                         }
+                    }
+
+                    self.push_window_value(literal_byte);
+                    for _ in 0..(count - 1) {
+                        let byte = self.lookahead.pop_back().unwrap();
+                        self.push_window_value(byte);
                     }
                 } else {
                     if let Some(output_byte) = byte_buffer.add_bit(true) {
@@ -100,9 +105,9 @@ impl<'a, const W: usize, const L: usize, const WINDOW_SIZE: usize, const LOOKAHE
                     if let Some(output_byte) = byte_buffer.add_byte(literal_byte) {
                         yield output_byte;
                     };
-                }
 
-                self.push_window_value(literal_byte);
+                    self.push_window_value(literal_byte);
+                }
             }
             return;
         }
@@ -110,6 +115,7 @@ impl<'a, const W: usize, const L: usize, const WINDOW_SIZE: usize, const LOOKAHE
 
     fn find_lookahead_in_window(&self, literal_byte: u8) -> Option<(usize, usize)> {
         let mut max_match = None;
+        let filled_window_count = self.window.oldest_ordered().into_iter().count();
         let mut window_iter = self.window.oldest_ordered().into_iter().enumerate();
 
         while let Some((index, &byte)) = window_iter.next() {
@@ -124,7 +130,7 @@ impl<'a, const W: usize, const L: usize, const WINDOW_SIZE: usize, const LOOKAHE
                     .count();
 
                 if current_count > max_match.map_or(2, |(_, len)| len) {
-                    max_match = Some((self.window.len() - index, current_count));
+                    max_match = Some((filled_window_count - index, current_count));
                 }
             }
         }
@@ -147,7 +153,7 @@ impl<'a, const W: usize, const L: usize, const WINDOW_SIZE: usize, const LOOKAHE
                         }
                     }
                     false => {
-                        // TODO: this doesn't seem right
+                        yield 0b00101011;
                         let back_ref_index = if W > 8 {
                             let msb_index_byte = bb_iter.next();
                             let lsb_index_byte = bb_iter.next();
@@ -187,10 +193,11 @@ impl<'a, const W: usize, const L: usize, const WINDOW_SIZE: usize, const LOOKAHE
 
                         dbg!(&count, &back_ref_index);
 
-                        for _ in 0..count {
+                        for i in 0..count {
                             // since we always add 1 to the window index when we output
                             // the back_ref_index doesn't need to change
                             let output_byte = self.get_window_value(back_ref_index);
+                            dbg!(output_byte);
                             self.push_window_value(output_byte);
                             yield output_byte;
                         }
@@ -219,10 +226,17 @@ impl<'a, const W: usize, const L: usize, const WINDOW_SIZE: usize, const LOOKAHE
     }
 
     fn get_window_value(&self, back_index: usize) -> u8 {
-        if back_index > self.window.len() {
-            return 0;
-        }
-        self.window.into_iter().nth(back_index).map_or(0, |b| *b)
+        dbg!(back_index);
+
+        // There must be a better way than this
+        // I just want to go back `back_index` values in the window
+        let len = self.window.oldest_ordered().count();
+
+        self.window
+            .oldest_ordered()
+            .into_iter()
+            .nth(len - back_index)
+            .map_or(0, |b| *b)
     }
 
     fn push_window_value(&mut self, byte: u8) -> () {
@@ -292,6 +306,32 @@ mod tests {
     fn encode_decode() {
         let input = include_bytes!("./lib.rs");
         let mut hs = <heatshrink!(8, 4)>::new();
+
+        let input_iter = (*input).iter();
+        let encode_iter = hs.encode(input_iter);
+
+        let encode_output: Vec<u8> = encode_iter.collect();
+
+        let mut file = File::create("./test_output/test-output-rs.bin").unwrap();
+        file.write_all(&encode_output).unwrap();
+
+        hs.reset();
+
+        let encode_output_iter = encode_output.iter();
+
+        let out = hs.decode(encode_output_iter);
+
+        let decoded_output: Vec<u8> = out.collect();
+
+        let mut file = File::create("./test_output/test-output-rs-decoded.rs").unwrap();
+        file.write_all(&decoded_output).unwrap();
+        // assert_eq!(result, expected_output);
+    }
+
+    #[test]
+    fn encode_decode_but_big() {
+        let input = include_bytes!("./lib.rs");
+        let mut hs = <heatshrink!(16, 8)>::new();
 
         let input_iter = (*input).iter();
         let encode_iter = hs.encode(input_iter);
