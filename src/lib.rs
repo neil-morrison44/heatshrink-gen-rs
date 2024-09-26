@@ -105,6 +105,9 @@ impl<'a, const W: usize, const L: usize, const WINDOW_SIZE: usize, const LOOKAHE
                     self.push_window_value(literal_byte);
                 }
             }
+
+            yield_some_byte!(byte_buffer.last_byte());
+
             return;
         }
     }
@@ -137,7 +140,6 @@ impl<'a, const W: usize, const L: usize, const WINDOW_SIZE: usize, const LOOKAHE
     pub fn decode<I: Iterator<Item = &'a u8>>(&mut self, input: I) -> impl Iterator<Item = u8> {
         gen move {
             let mut bb_iter = BitsBytesIter::new(input);
-
             while let Some(bit) = bb_iter.next_bit() {
                 match bit {
                     true => {
@@ -316,7 +318,7 @@ mod tests {
 
         let mut file = File::create("./test_output/test-output-rs-decoded.rs").unwrap();
         file.write_all(&decoded_output).unwrap();
-        // assert_eq!(result, expected_output);
+        assert_eq!(input.to_vec(), decoded_output);
     }
 
     #[test]

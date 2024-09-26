@@ -28,6 +28,14 @@ impl ByteBuffer {
         return self.maybe_return_byte();
     }
 
+    pub fn last_byte(&mut self) -> Option<u8> {
+        if self.index > 0 {
+            self.add_byte(0)
+        } else {
+            None
+        }
+    }
+
     fn maybe_return_byte(&mut self) -> Option<u8> {
         if self.index >= 8 {
             // Construct the byte from the first 8 bits of the buffer
