@@ -186,19 +186,19 @@ mod tests {
 
     #[test]
     fn big_file() {
-        let input = include_bytes!("../../test_inputs/tsz-compressed-data.bin");
+        let input = include_bytes!("./mod.rs");
 
         let mut or = BitsBytesIter::new(input.into_iter());
 
         let result: Vec<u8> = or.collect();
 
-        let expected_output = include_bytes!("../../test_inputs/tsz-compressed-data.bin");
+        let expected_output = include_bytes!("./mod.rs");
         assert_eq!(result, expected_output);
     }
 
     #[test]
     fn big_file_bit_shifted() {
-        let input = include_bytes!("../../test_inputs/tsz-compressed-data.bin");
+        let input = include_bytes!("./mod.rs");
         let mut or = BitsBytesIter::new(input.into_iter());
 
         or.next();
@@ -216,7 +216,7 @@ mod tests {
 
         let result: Vec<u8> = or.collect();
 
-        let expected_output = include_bytes!("../../test_inputs/tsz-compressed-data.bin");
+        let expected_output = include_bytes!("./mod.rs");
         let mut expected_output_iter = expected_output.into_iter();
 
         expected_output_iter.next();

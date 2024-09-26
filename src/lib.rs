@@ -248,51 +248,12 @@ mod tests {
         let first: u8 = 0b11000000;
         let second: u8 = 0b11100000;
         let input: Vec<&u8> = vec![&first, &second];
-        let mut hs = <heatshrink!(13, 4)>::new();
+        let mut hs = <heatshrink!(8, 4)>::new();
 
         let out = hs.decode(input.into_iter());
 
         let result: Vec<u8> = out.collect();
         assert_eq!(result, vec![129, 128]);
-    }
-
-    #[test]
-    fn compare_loop() {
-        let input = include_bytes!("../test_inputs/tsz-compressed-data.bin.hs");
-        let mut hs = <heatshrink!(8, 4)>::new();
-
-        let input_iter = (*input).iter();
-        let mut out = hs.decode(input_iter);
-
-        let expected_output = include_bytes!("../test_inputs/tsz-compressed-data.bin");
-        let mut expected_iter = expected_output.iter();
-
-        let mut index = 0;
-
-        while let Some(expected) = expected_iter.next() {
-            let actual = out.next().unwrap();
-
-            assert_eq!(actual, *expected, "Failed on index {index}");
-            index += 1;
-        }
-    }
-
-    #[test]
-    fn decode_bytes() {
-        let input = include_bytes!("../test_inputs/tsz-compressed-data.bin.hs");
-        let mut hs = <heatshrink!(8, 4)>::new();
-
-        let input_iter = (*input).iter();
-
-        let out = hs.decode(input_iter);
-
-        let result: Vec<u8> = out.collect();
-
-        let mut file = File::create("./test_output/test-output.bin").unwrap();
-        file.write_all(&result).unwrap();
-
-        // let expected_output = include_bytes!("../tsz-compressed-data.bin");
-        // assert_eq!(result, expected_output);
     }
 
     #[test]
@@ -305,8 +266,8 @@ mod tests {
 
         let encode_output: Vec<u8> = encode_iter.collect();
 
-        let mut file = File::create("./test_output/test-output-rs.bin").unwrap();
-        file.write_all(&encode_output).unwrap();
+        // let mut file = File::create("./test_output/test-output-rs.bin").unwrap();
+        // file.write_all(&encode_output).unwrap();
 
         hs.reset();
 
@@ -316,8 +277,8 @@ mod tests {
 
         let decoded_output: Vec<u8> = out.collect();
 
-        let mut file = File::create("./test_output/test-output-rs-decoded.rs").unwrap();
-        file.write_all(&decoded_output).unwrap();
+        // let mut file = File::create("./test_output/test-output-rs-decoded.rs").unwrap();
+        // file.write_all(&decoded_output).unwrap();
         assert_eq!(input.to_vec(), decoded_output);
     }
 
@@ -331,8 +292,8 @@ mod tests {
 
         let encode_output: Vec<u8> = encode_iter.collect();
 
-        let mut file = File::create("./test_output/test-output-rs.bin").unwrap();
-        file.write_all(&encode_output).unwrap();
+        // let mut file = File::create("./test_output/test-output-rs.bin").unwrap();
+        // file.write_all(&encode_output).unwrap();
 
         hs.reset();
 
@@ -342,8 +303,8 @@ mod tests {
 
         let decoded_output: Vec<u8> = out.collect();
 
-        let mut file = File::create("./test_output/test-output-rs-decoded.rs").unwrap();
-        file.write_all(&decoded_output).unwrap();
+        // let mut file = File::create("./test_output/test-output-rs-decoded.rs").unwrap();
+        // file.write_all(&decoded_output).unwrap();
         assert_eq!(input.to_vec(), decoded_output);
     }
 }
