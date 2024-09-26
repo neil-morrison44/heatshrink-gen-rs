@@ -342,6 +342,6 @@ mod tests {
 
         let mut file = File::create("./test_output/test-output-rs-decoded.rs").unwrap();
         file.write_all(&decoded_output).unwrap();
-        // assert_eq!(result, expected_output);
+        assert_eq!(input.to_vec(), decoded_output);
     }
 }
