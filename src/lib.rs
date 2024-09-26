@@ -43,9 +43,9 @@ impl<'a, const W: usize, const L: usize, const WINDOW_SIZE: usize, const LOOKAHE
     }
 
     pub fn encode<I: Iterator<Item = &'a u8>>(&mut self, mut input: I) -> impl Iterator<Item = u8> {
-        macro_rules! yield_some_byte {
-            ($c:expr) => {
-                if let Some(output_byte) = $c {
+        macro_rules! yield_byte {
+            ($byte:expr) => {
+                if let Some(output_byte) = $byte {
                     yield output_byte;
                 }
             };
@@ -54,8 +54,9 @@ impl<'a, const W: usize, const L: usize, const WINDOW_SIZE: usize, const LOOKAHE
         gen move {
             let mut byte_buffer = ByteBuffer::new();
 
-            if let Some(input_byte) = input.next() {
-                self.lookahead.push_back(*input_byte).unwrap();
+            // Load the first byte into lookahead buffer
+            if let Some(&input_byte) = input.next() {
+                self.lookahead.push_back(input_byte).unwrap();
             }
 
             loop {
@@ -66,31 +67,26 @@ impl<'a, const W: usize, const L: usize, const WINDOW_SIZE: usize, const LOOKAHE
                         break;
                     }
                 }
-
                 if self.lookahead.is_empty() {
                     break;
                 }
 
                 let literal_byte = self.lookahead.pop_front().unwrap();
-
                 if let Some((back_ref_index, count)) = self.find_lookahead_in_window(literal_byte) {
-                    yield_some_byte!(byte_buffer.add_bit(false));
+                    yield_byte!(byte_buffer.add_bit(false));
 
                     if W > 8 {
                         let msb_index_byte: u8 = (back_ref_index >> 8) as u8;
                         let lsb_index_byte: u8 = (back_ref_index & 0xFF) as u8;
-
-                        yield_some_byte!(byte_buffer.add_byte(msb_index_byte));
-                        yield_some_byte!(byte_buffer.add_byte(lsb_index_byte));
+                        yield_byte!(byte_buffer.add_byte(msb_index_byte));
+                        yield_byte!(byte_buffer.add_byte(lsb_index_byte));
                     } else {
-                        let back_ref_byte = back_ref_index as u8;
-                        yield_some_byte!(byte_buffer.add_byte(back_ref_byte));
+                        yield_byte!(byte_buffer.add_byte(back_ref_index as u8));
                     }
 
                     let bits = self.write_number_to_bits(count - 1);
-
                     for bit in bits {
-                        yield_some_byte!(byte_buffer.add_bit(bit));
+                        yield_byte!(byte_buffer.add_bit(bit));
                     }
 
                     self.push_window_value(literal_byte);
@@ -99,16 +95,68 @@ impl<'a, const W: usize, const L: usize, const WINDOW_SIZE: usize, const LOOKAHE
                         self.push_window_value(byte);
                     }
                 } else {
-                    yield_some_byte!(byte_buffer.add_bit(true));
-                    yield_some_byte!(byte_buffer.add_byte(literal_byte));
+                    yield_byte!(byte_buffer.add_bit(true));
+                    yield_byte!(byte_buffer.add_byte(literal_byte));
 
                     self.push_window_value(literal_byte);
                 }
             }
 
-            yield_some_byte!(byte_buffer.last_byte());
+            yield_byte!(byte_buffer.last_byte());
 
             return;
+        }
+    }
+
+    pub fn decode<I: Iterator<Item = &'a u8>>(&mut self, input: I) -> impl Iterator<Item = u8> {
+        gen move {
+            let mut bb_iter = BitsBytesIter::new(input);
+            while let Some(bit) = bb_iter.next_bit() {
+                match bit {
+                    true => {
+                        if let Some(byte) = bb_iter.next() {
+                            self.push_window_value(byte);
+                            yield byte;
+                        } else {
+                            return;
+                        }
+                    }
+                    false => {
+                        let back_ref_index = if W > 8 {
+                            // Read two bytes for the back reference index
+                            match (bb_iter.next(), bb_iter.next()) {
+                                (Some(msb), Some(lsb)) => ((msb as usize) << 8) | (lsb as usize),
+                                _ => return, // If we can't read two bytes, exit
+                            }
+                        } else {
+                            // Read one byte for the back reference index
+                            if let Some(back_ref) = bb_iter.next() {
+                                back_ref as usize
+                            } else {
+                                return;
+                            }
+                        };
+
+                        let mut count_bits = [false; L];
+
+                        for bit in count_bits.iter_mut() {
+                            if let Some(next_bit) = bb_iter.next_bit() {
+                                *bit = next_bit;
+                            } else {
+                                return;
+                            }
+                        }
+
+                        let count = self.read_number_from_bits(&mut count_bits) + 1;
+
+                        for _ in 0..count {
+                            let output_byte = self.get_window_value(back_ref_index);
+                            self.push_window_value(output_byte);
+                            yield output_byte;
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -137,101 +185,39 @@ impl<'a, const W: usize, const L: usize, const WINDOW_SIZE: usize, const LOOKAHE
         max_match
     }
 
-    pub fn decode<I: Iterator<Item = &'a u8>>(&mut self, input: I) -> impl Iterator<Item = u8> {
-        gen move {
-            let mut bb_iter = BitsBytesIter::new(input);
-            while let Some(bit) = bb_iter.next_bit() {
-                match bit {
-                    true => {
-                        if let Some(byte) = bb_iter.next() {
-                            self.push_window_value(byte);
-                            yield byte;
-                        } else {
-                            return;
-                        }
-                    }
-                    false => {
-                        let back_ref_index = if W > 8 {
-                            let msb_index_byte = bb_iter.next();
-                            let lsb_index_byte = bb_iter.next();
-
-                            if let [Some(msb_index_byte), Some(lsb_index_byte)] =
-                                [msb_index_byte, lsb_index_byte]
-                            {
-                                let msb_index_byte: usize = msb_index_byte.into();
-                                let lsb_index_byte: usize = lsb_index_byte.into();
-                                let back_ref_index: usize = (msb_index_byte << 8) | lsb_index_byte;
-                                back_ref_index
-                            } else {
-                                return;
-                            }
-                        } else {
-                            let back_ref_index = bb_iter.next();
-
-                            if let Some(back_ref_index) = back_ref_index {
-                                back_ref_index.into()
-                            } else {
-                                return;
-                            }
-                        };
-
-                        let mut count_bits: [bool; L] = [false; L];
-
-                        for i in 0..L {
-                            let bit = bb_iter.next_bit();
-                            if let Some(bit) = bit {
-                                count_bits[i] = bit;
-                            } else {
-                                return;
-                            }
-                        }
-
-                        let count = self.read_number_from_bits(&mut count_bits) + 1;
-
-                        for i in 0..count {
-                            // since we always add 1 to the window index when we output
-                            // the back_ref_index doesn't need to change
-                            let output_byte = self.get_window_value(back_ref_index);
-                            // dbg!(output_byte);
-                            self.push_window_value(output_byte);
-                            yield output_byte;
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    fn read_number_from_bits(&mut self, bits: &mut [bool; L]) -> usize {
-        let mut result = 0;
-        for (i, &bit) in bits.iter().enumerate() {
-            if bit {
-                result |= 1 << (L - 1 - i);
-            }
-        }
-        result
+    fn read_number_from_bits(&self, bits: &[bool; L]) -> usize {
+        bits.iter()
+            .enumerate()
+            .fold(0, |acc, (i, &bit)| acc | ((bit as usize) << (L - 1 - i)))
     }
 
     fn write_number_to_bits(&self, number: usize) -> [bool; L] {
         let mut bits = [false; L];
-        for i in 0..L {
-            bits[i] = (number & (1 << (L - 1 - i))) != 0;
-        }
+        (0..L).for_each(|i| bits[i] = (number >> (L - 1 - i)) & 1 != 0);
         bits
     }
 
     fn get_window_value(&self, back_index: usize) -> u8 {
-        let (first_slice, second_slice) = self.window.as_slices();
+        let (first, second) = self.window.as_slices();
 
-        if back_index < second_slice.len() {
-            let index = (second_slice.len() - 1) - back_index;
-            second_slice[index]
+        if let Some(index) = second
+            .len()
+            .checked_sub(1)
+            .and_then(|len| len.checked_sub(back_index))
+        {
+            second[index]
+        } else if let Some(index) = first
+            .len()
+            .checked_sub(1)
+            .and_then(|len| len.checked_sub(back_index - second.len()))
+        {
+            first[index]
         } else {
-            let index = (first_slice.len() - 1) - (back_index - second_slice.len());
-            first_slice[index]
+            panic!("Back index out of bounds");
         }
     }
 
+    #[inline]
     fn push_window_value(&mut self, byte: u8) -> () {
         self.window.write(byte);
     }
