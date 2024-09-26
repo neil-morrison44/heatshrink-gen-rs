@@ -76,7 +76,7 @@ impl<'a, const W: usize, const L: usize, const WINDOW_SIZE: usize, const LOOKAHE
                 if let Some((back_ref_index, count)) = self.find_lookahead_in_window(literal_byte) {
                     yield_some_byte!(byte_buffer.add_bit(false));
 
-                    if W > 255 {
+                    if W > 8 {
                         let msb_index_byte: u8 = (back_ref_index >> 8) as u8;
                         let lsb_index_byte: u8 = (back_ref_index & 0xFF) as u8;
 
