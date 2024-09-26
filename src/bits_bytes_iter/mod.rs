@@ -1,18 +1,7 @@
-use std::fmt::Debug;
-
 pub struct BitsBytesIter<'a, I: Iterator<Item = &'a u8>> {
     bit_offset: u8,
     raw_iter: I,
     window: [Option<&'a u8>; 2],
-}
-
-impl<'a, I: Iterator<Item = &'a u8>> Debug for BitsBytesIter<'a, I> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("BitsBytesIter")
-            .field("bit_offset", &self.bit_offset)
-            .field("window", &self.window)
-            .finish()
-    }
 }
 
 impl<'a, I: Iterator<Item = &'a u8>> Iterator for BitsBytesIter<'a, I> {
@@ -85,8 +74,6 @@ impl<'a, I: Iterator<Item = &'a u8>> BitsBytesIter<'a, I> {
 
 #[cfg(test)]
 mod tests {
-    use crate::bits_bytes_iter;
-
     use super::*;
 
     #[test]
@@ -188,7 +175,7 @@ mod tests {
     fn big_file() {
         let input = include_bytes!("./mod.rs");
 
-        let mut or = BitsBytesIter::new(input.into_iter());
+        let or = BitsBytesIter::new(input.into_iter());
 
         let result: Vec<u8> = or.collect();
 
