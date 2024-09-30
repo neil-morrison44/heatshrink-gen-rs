@@ -54,11 +54,6 @@ impl<'a, const W: usize, const L: usize, const WINDOW_SIZE: usize, const LOOKAHE
         gen move {
             let mut byte_buffer = ByteBuffer::new();
 
-            // Load the first byte into lookahead buffer
-            if let Some(&input_byte) = input.next() {
-                self.lookahead.push_back(input_byte).unwrap();
-            }
-
             loop {
                 while !self.lookahead.is_full() {
                     if let Some(input_byte) = input.next() {
