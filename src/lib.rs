@@ -221,20 +221,23 @@ impl<'a, const W: usize, const L: usize, const WINDOW_SIZE: usize, const LOOKAHE
 }
 
 #[cfg(test)]
+
 mod tests {
+    extern crate std;
     use super::*;
+    use std::vec::Vec;
 
     #[test]
     fn passthrough_bytes() {
         let first: u8 = 0b11000000;
         let second: u8 = 0b11100000;
-        let input: Vec<&u8> = vec![&first, &second];
+        let input: Vec<&u8> = std::vec![&first, &second];
         let mut hs = <heatshrink!(8, 4)>::new();
 
         let out = hs.decode(input.into_iter());
 
         let result: Vec<u8> = out.collect();
-        assert_eq!(result, vec![129, 128]);
+        assert_eq!(result, std::vec![129, 128]);
     }
 
     #[test]
