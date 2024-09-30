@@ -75,13 +75,14 @@ impl<'a, I: Iterator<Item = &'a u8>> BitsBytesIter<'a, I> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    extern crate std;
 
     #[test]
     fn all_bits() {
         let first: u8 = 0b10101010;
         let second: u8 = 0b11001100;
 
-        let input = vec![&first, &second];
+        let input = std::vec![&first, &second];
 
         let mut or = BitsBytesIter::new(input.into_iter());
 
@@ -133,7 +134,7 @@ mod tests {
         let first: u8 = 0b10101010;
         let second: u8 = 0b11001100;
 
-        let input = vec![&first, &second];
+        let input = std::vec![&first, &second];
         let mut or = BitsBytesIter::new(input.into_iter());
 
         let bytes = [or.next(), or.next(), or.next()];
@@ -145,7 +146,7 @@ mod tests {
         let first: u8 = 0b10101010;
         let second: u8 = 0b11001100;
 
-        let input = vec![&first, &second];
+        let input = std::vec![&first, &second];
         let mut or = BitsBytesIter::new(input.into_iter());
 
         let bit = or.next_bit();
@@ -160,7 +161,7 @@ mod tests {
         let first: u8 = 0b10101010;
         let second: u8 = 0b11001100;
 
-        let input = vec![&first, &second];
+        let input = std::vec![&first, &second];
         let mut or = BitsBytesIter::new(input.into_iter());
 
         let bits: [Option<bool>; 4] = [or.next_bit(), or.next_bit(), or.next_bit(), or.next_bit()];
@@ -177,7 +178,7 @@ mod tests {
 
         let or = BitsBytesIter::new(input.into_iter());
 
-        let result: Vec<u8> = or.collect();
+        let result: std::vec::Vec<u8> = or.collect();
 
         let expected_output = include_bytes!("./mod.rs");
         assert_eq!(result, expected_output);
@@ -201,7 +202,7 @@ mod tests {
 
         or.next();
 
-        let result: Vec<u8> = or.collect();
+        let result: std::vec::Vec<u8> = or.collect();
 
         let expected_output = include_bytes!("./mod.rs");
         let mut expected_output_iter = expected_output.into_iter();
@@ -211,7 +212,8 @@ mod tests {
         expected_output_iter.next();
         expected_output_iter.next();
 
-        let modified_expected_output: Vec<u8> = expected_output_iter.map(|v| *v).collect();
+        let modified_expected_output: std::vec::Vec<u8> =
+            expected_output_iter.map(|v| *v).collect();
 
         assert_eq!(result, modified_expected_output);
     }
