@@ -1,4 +1,6 @@
+#![no_std]
 #![feature(gen_blocks)]
+#![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
 
 use bits_bytes_iter::BitsBytesIter;
@@ -220,8 +222,6 @@ impl<'a, const W: usize, const L: usize, const WINDOW_SIZE: usize, const LOOKAHE
 
 #[cfg(test)]
 mod tests {
-    use std::{fs::File, io::Write};
-
     use super::*;
 
     #[test]
